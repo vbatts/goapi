@@ -35,6 +35,7 @@ var (
 	nextFile   = flag.String("next", "", "optional filename of tentative upcoming API features for the next release. This file can be lazily maintained. It only affects the delta warnings from the -c file printed on success.")
 	verbose    = flag.Bool("v", false, "verbose debugging")
 	forceCtx   = flag.String("contexts", "", "optional comma-separated list of <goos>-<goarch>[-cgo] to override default contexts.")
+	useGopath  = flag.Bool("gopath", false, "include package names from GOPATH as well")
 )
 
 // contexts are the default contexts which are scanned, unless
@@ -121,10 +122,25 @@ func main() {
 	}
 	for _, c := range contexts {
 		c.Compiler = build.Default.Compiler
+		if *useGopath {
+			c.GOPATH = build.Default.GOPATH
+		} else {
+			c.GOPATH = ""
+		}
 	}
 
 	var pkgNames []string
-	if flag.NArg() > 0 {
+	if flag.NArg() == 1 && flag.Args()[0] == "std" {
+		stds, err := exec.Command("go", "list", "std").Output()
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, pkg := range strings.Fields(string(stds)) {
+			if !internalPkg.MatchString(pkg) {
+				pkgNames = append(pkgNames, pkg)
+			}
+		}
+	} else if flag.NArg() > 0 {
 		pkgNames = flag.Args()
 	} else {
 		stds, err := exec.Command("go", "list", "std").Output()
@@ -140,7 +156,11 @@ func main() {
 
 	var featureCtx = make(map[string]map[string]bool) // feature -> context name -> true
 	for _, context := range contexts {
-		w := NewWalker(context, filepath.Join(build.Default.GOROOT, "src"))
+		gopathroot := ""
+		if *useGopath {
+			gopathroot = filepath.Join(build.Default.GOPATH, "src")
+		}
+		w := NewWalker(context, filepath.Join(build.Default.GOROOT, "src"), gopathroot)
 
 		for _, name := range pkgNames {
 			// - Package "unsafe" contains special signatures requiring
@@ -164,6 +184,7 @@ func main() {
 			}
 			featureCtx[f][ctxName] = true
 		}
+
 	}
 
 	var features []string
@@ -328,16 +349,18 @@ var fset = token.NewFileSet()
 type Walker struct {
 	context  *build.Context
 	root     string
+	gopath   string
 	scope    []string
 	current  *types.Package
 	features map[string]bool           // set
 	imported map[string]*types.Package // packages already imported
 }
 
-func NewWalker(context *build.Context, root string) *Walker {
+func NewWalker(context *build.Context, root string, gopath string) *Walker {
 	return &Walker{
 		context:  context,
 		root:     root,
+		gopath:   gopath,
 		features: map[string]bool{},
 		imported: map[string]*types.Package{"unsafe": types.Unsafe},
 	}
@@ -429,8 +452,18 @@ func (w *Walker) Import(name string) (*types.Package, error) {
 	w.imported[name] = &importing
 
 	// Determine package files.
+	found := false
 	dir := filepath.Join(w.root, filepath.FromSlash(name))
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		found = true
+	}
+	if !found && w.gopath != "" {
+		dir = filepath.Join(w.gopath, filepath.FromSlash(name))
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			found = true
+		}
+	}
+	if !found {
 		log.Fatalf("no source in tree for package %q", pkg)
 	}
 
