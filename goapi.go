@@ -233,6 +233,9 @@ func (w *Walker) export(pkg *types.Package) {
 	if *verbose {
 		log.Println(pkg)
 	}
+	if pkg == nil {
+		return
+	}
 	pop := w.pushScope("pkg " + pkg.Path())
 	w.current = pkg
 	scope := pkg.Scope()
