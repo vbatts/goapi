@@ -38,7 +38,7 @@ func TestGolden(t *testing.T) {
 
 		// TODO(gri) remove extra pkg directory eventually
 		goldenFile := filepath.Join("testdata", "src", "pkg", fi.Name(), "golden.txt")
-		w := NewWalker(nil, "testdata/src/pkg")
+		w := NewWalker(nil, "testdata/src/pkg", "")
 		pkg, _ := w.Import(fi.Name())
 		w.export(pkg)
 
@@ -176,7 +176,7 @@ func BenchmarkAll(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for _, context := range contexts {
-			w := NewWalker(context, filepath.Join(build.Default.GOROOT, "src"))
+			w := NewWalker(context, filepath.Join(build.Default.GOROOT, "src"), "")
 			for _, name := range pkgNames {
 				if name != "unsafe" && !strings.HasPrefix(name, "cmd/") {
 					pkg, _ := w.Import(name)
